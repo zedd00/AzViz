@@ -2,7 +2,6 @@ function ConvertFrom-Network {
     [CmdletBinding()]
     param (
         [string[]] $Targets,
-        [ValidateSet('Azure Resource Group')]
         [string] $TargetType = 'Azure Resource Group',
         [int] $CategoryDepth = 1,
         [string[]] $ExcludeTypes

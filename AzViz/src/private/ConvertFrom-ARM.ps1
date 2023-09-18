@@ -2,9 +2,9 @@ function ConvertFrom-ARM {
     [CmdletBinding()]
     param (
         [string[]] $Targets,
-        [ValidateSet('Azure Resource Group')]
         [string] $TargetType = 'Azure Resource Group',
         [int] $CategoryDepth = 1,
+        [string] $Subscription,
         [string[]] $ExcludeTypes
     )
     
@@ -42,35 +42,77 @@ function ConvertFrom-ARM {
         #     $Target = $_
         #     $Rank = $using:Rank
         #     $scriptblock = [scriptblock]::Create($using:condition)
+        #set-AzContext -Subscription $Subscription
+        #$SubscriptionID = Get-AzSubscription -SubscriptionName $Subscription | Select-Object -ExpandProperty Id
         
         Foreach($Target in $Targets){
             
             $temp_armtemplate = New-TemporaryFile
+            $resources = @()
             # $temp_armtemplate = (Join-Path ([System.IO.Path]::GetTempPath()) "armtemplate.json")
                 
             #region obtaining-arm-template
             switch ($TargetType) {
                 'Azure Resource Group' { 
                     Write-CustomHost "Exporting ARM template of Azure resource group: `'$Target`'" -Indentation 1 -color Green
-                    $template = (Export-AzResourceGroup -ResourceGroupName $Target -SkipAllParameterization -Force -Path $temp_armtemplate -WarningAction SilentlyContinue -Verbose:$false).Path
+                    try {
+                        $template = (Export-AzResourceGroup -ResourceGroupName $Target -SkipAllParameterization -Force -Path $temp_armtemplate -WarningAction SilentlyContinue -Verbose:$false).Path
+                        $arm = Get-Content -Path $template | ConvertFrom-Json
+                        $resources = $arm.Resources | Where-Object $scriptblock
+                    } catch {
+                        $queryResult = Search-AzGraph -Query "Resources | where resourceGroup == `'$Target`' and subscriptionId == `'$SubscriptionID`'"
+                        # Extract the "id" property from the query result
+                        $idList = $queryResult | ForEach-Object { $_.id }
+                        $idList = $idList -split "`r`n"
+                        # Define the batch size
+                        $batchSize = 199
+                        # Calculate the number of batches
+                        $numBatches = [Math]::Ceiling($idList.Count / $batchSize)
+                        # Loop through the batches
+                        for ($i = 0; $i -lt $numBatches; $i++) {
+                            # Get a slice of $idList for the current batch
+                            $startIndex = $i * $batchSize
+                            $endIndex = ($i + 1) * $batchSize - 1
+                            $batch = $idList[$startIndex..$endIndex]
+                        
+                            # Filter out resource IDs that do not belong to the specified resource group
+                            $filteredBatch = $batch | Where-Object { $_ -like "/subscriptions/$subscriptionid/resourceGroups/$Target/*" }
+                        
+                            # Check if there are any valid resource IDs in the batch
+                            if ($filteredBatch.Count -gt 0) {
+                                $templateVariableName = if ($i -eq 0) { "template" } else { "template$i" }
+                                $templatePath = (Export-AzResourceGroup -ResourceGroupName $Target -Resource $filteredBatch -SkipAllParameterization -Force -Path $temp_armtemplate -WarningAction SilentlyContinue -Verbose:$false).Path
+                        
+                                # Assign the template path to the variable with a dynamic name
+                                Set-Variable -Name $templateVariableName -Value $templatePath
+                                $arm = Get-Content -Path $templatePath | ConvertFrom-Json
+                                $resources += $arm.Resources | Where-Object $scriptblock
+                                Write-CustomHost "Total resources found: $($resources.count)"  -Indentation 2 -color Green
+                            }
+                        }
+                    }
+
                 }
                 'File' { 
                     Write-CustomHost "Accessing ARM template from local file: `'$Target`'" -Indentation 2 -color Green
                     $template = $Target
+                    $arm = Get-Content -Path $template | ConvertFrom-Json
+                    $resources = $arm.Resources | Where-Object $scriptblock
                 }
                 'Url' {
                     Write-CustomHost "Downloading ARM template from URL: `'$Target`'" -Indentation 2 -color Green
                     # $Target = 'https://raw.githubusercontent.com/Azure/azure-quickstart-templates/master/101-vm-simple-linux/azuredeploy.json'
                     $template = $temp_armtemplate
                     Invoke-WebRequest -Uri  $Target -OutFile $template  -Verbose:$false
+                    $arm = Get-Content -Path $template | ConvertFrom-Json
+                    $resources = $arm.Resources | Where-Object $scriptblock
                     # todo test-path the downloaded file
                 }
             }
 
             Write-CustomHost "Processing the ARM template to extract resources" -Indentation 2 -color Green
 
-            $arm = Get-Content -Path $template | ConvertFrom-Json
-            $resources = $arm.Resources | Where-Object $scriptblock
+            
 
             if ($resources) {
                 Write-CustomHost "Total resources found: $($resources.count)"  -Indentation 2 -color Green
@@ -86,8 +128,7 @@ function ConvertFrom-ARM {
 
             #region parsing-arm-template-and-finding-resource-dependencies
             $data = @()
-            # $excluded_types = @("scheduledqueryrules","containers","solutions","modules","savedSearches")
-                                
+            # $excluded_types = @("scheduledqueryrules","containers","solutions","modules","savedSearches")            
             $data += $resources |
             Where-Object { $_.type.tostring().split("/").count -le $($CategoryDepth + 1) } |
             ForEach-Object {

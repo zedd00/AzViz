@@ -2,12 +2,12 @@ function ConvertTo-DOTLanguage {
     [CmdletBinding()]
     param (
         [string[]] $Targets,
-        [ValidateSet('Azure Resource Group')]
         [string] $TargetType = 'Azure Resource Group',
         [int] $LabelVerbosity = 1,
         [int] $CategoryDepth = 1,
         [string] $Direction = 'top-to-bottom',
         [string] $Splines = 'spline',
+        [string] $Subscription,
         [string[]] $ExcludeTypes
     )
     
@@ -24,11 +24,11 @@ function ConvertTo-DOTLanguage {
             break
         }
         
-        $SpecialChars = '() []{}&-.'
+        $SpecialChars = '() []{}&.-'
         $GraphObjects = @()
         $NetworkObjects = ConvertFrom-Network -TargetType $TargetType -Targets $Targets -CategoryDepth $CategoryDepth -ExcludeTypes $ExcludeTypes
         $GraphObjects += $NetworkObjects
-        $ARMObjects = ConvertFrom-ARM -TargetType $TargetType -Targets $Targets -CategoryDepth $CategoryDepth -ExcludeTypes $ExcludeTypes
+        $ARMObjects = ConvertFrom-ARM -TargetType $TargetType -Targets $Targets -CategoryDepth $CategoryDepth -Subscription $Subscription -ExcludeTypes $ExcludeTypes
         $GraphObjects += $ARMObjects
 
         $GraphObjects = $GraphObjects | 
@@ -335,10 +335,10 @@ function ConvertTo-DOTLanguage {
                 $graph | Out-String | Out-File $dot_file -Verbose:$false -Encoding ascii
                 if (Test-Path $dot_file) {
                     if ($IsLinux) {
-                        Invoke-Expression "$($GraphViz.FullName) $dot_file"
+                        Invoke-Expression "$($GraphViz.FullName) -Kneato $dot_file"
                     }
                     else {
-                        & $GraphViz.FullName $dot_file
+                        & $GraphViz.FullName -Kneato $dot_file
                     }
 
                     Remove-Item $dot_file -Force

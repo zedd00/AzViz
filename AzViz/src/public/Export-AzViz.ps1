@@ -143,7 +143,8 @@ function Export-AzViz {
         # [Parameter(ParameterSetName = 'FilePath')]
         # [Parameter(ParameterSetName = 'Url')]
         [ValidateNotNullOrEmpty()]
-        [string[]] $ExcludeTypes
+        [string[]] $ExcludeTypes,
+        [string] $Subscription
     )
 
 
@@ -266,7 +267,7 @@ function Export-AzViz {
         #region graph-generation
         Write-CustomHost "Starting to generate Azure visualization..." -Indentation 0 -color Magenta -AddTime
     
-        $graph = ConvertTo-DOTLanguage -TargetType $TargetType -Targets $Targets -CategoryDepth $CategoryDepth -LabelVerbosity $LabelVerbosity -Splines $Splines -ExcludeTypes $ExcludeTypes
+        $graph = ConvertTo-DOTLanguage -TargetType $TargetType -Targets $Targets -CategoryDepth $CategoryDepth -LabelVerbosity $LabelVerbosity -Splines $Splines -Subscription $Subscription -ExcludeTypes $ExcludeTypes
 
         if ($graph) {
             @"
